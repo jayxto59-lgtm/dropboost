@@ -172,9 +172,11 @@ IMG_HOST = re.compile(r'^https://(?:[a-z0-9-]+\.)*(?:alicdn|aliexpress-media|ali
 
 
 def ae_get(url):
+    # Le serveur est aux États-Unis : ces cookies demandent la version française (titres en français, prix en euros)
     return requests.get(url, timeout=20, allow_redirects=True, headers={
         'User-Agent': UA, 'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.6',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Cookie': 'aep_usuc_f=site=fra&c_tp=EUR&region=FR&b_locale=fr_FR; intl_locale=fr_FR; xman_us_f=x_locale=fr_FR&x_l=0',
     })
 
 
