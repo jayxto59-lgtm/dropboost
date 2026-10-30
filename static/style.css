@@ -106,8 +106,15 @@ code.copy:hover { background: var(--line); }
 .hero p { margin: 12px 0 0; color: var(--muted); font-size: 16.5px; max-width: 46ch; }
 .new-form label:first-child { margin-top: 0; }
 .new-form .big { width: 100%; margin-top: 18px; background: var(--accent); }
-.new-form .big:hover { background: #cf3a20; }
+.new-form .big:hover { filter: brightness(.92); }
 .new-form .form-err { margin: 12px 0 0; }
+/* Atelier : même site, accent vert sapin pour qu'on voie tout de suite où on est */
+body.atelier { --accent: #2f6f55; }
+.brand em { font-style: normal; color: var(--accent); }
+.previews { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-top: 10px; }
+.previews:empty { display: none; }
+.previews img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; }
+input[type="file"] { padding: 10px; border: 1.5px dashed var(--line); border-radius: 10px; background: var(--soft); font: 500 14px/1.4 var(--body); color: var(--muted); }
 .ext { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 24px; align-items: center; }
 .ext-text p { margin: 8px 0 14px; color: var(--muted); }
 .ext-steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14.5px; color: #3b332c; }
