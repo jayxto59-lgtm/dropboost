@@ -74,7 +74,8 @@ async function platformApi(pf, path, data = {}) {
   if (res.auth) ls.set('db_auth_' + pf, { ...getAuth(pf), ...res.auth });
   return res;
 }
-const imgSrc = (u) => (u.startsWith('data:') ? u : '/api/img?u=' + encodeURIComponent(u));
+const imgSrc = (u) => (/^(data|blob):/.test(u) ? u : '/api/img?u=' + encodeURIComponent(u));
+const isAtelier = () => STATUS.mode === 'atelier';
 async function toJpeg(u, max = 1600, q = 0.9) {
   const r = await fetch(imgSrc(u));
   if (!r.ok) throw new Error('Photo inaccessible');
@@ -164,10 +165,17 @@ Product: ${cleanTitle(src.title)}`;
 }
 
 /* ---------- Nouveau produit ---------- */
+// Les notes du créateur (matières, taille, fabrication) passent juste après l'accroche
+function withNotes(description, notes) {
+  if (!notes || !notes.trim()) return description;
+  const i = description.indexOf('\n\n');
+  return i < 0 ? description + '\n\n' + notes.trim() : description.slice(0, i) + '\n\n' + notes.trim() + description.slice(i);
+}
+
 function newEdit(src, cost, shipping) {
   const g = generateCopy(src, settings.tone, 0, settings);
   return {
-    title: g.title, description: g.description, tone: settings.tone, seed: 0,
+    title: g.title, description: withNotes(g.description, src.notes), tone: settings.tone, seed: 0,
     cost, shipping, multiplier: settings.multiplier, priceOverride: null,
     ai: { style: 'studio', prompt: buildPrompt(src, 'studio'), ref: 0, count: 2 },
     gen: [], photos: (src.images || []).slice(0, 8), etsy: null, ebay: null
@@ -175,8 +183,13 @@ function newEdit(src, cost, shipping) {
 }
 
 /* ---------- Vue : accueil ---------- */
+const myProducts = async () => (await DB.all())
+  .filter((p) => (p.source.kind === 'atelier') === isAtelier())
+  .sort((a, b) => b.createdAt - a.createdAt);
+
 async function viewHome(prefill) {
-  const list = (await DB.all()).sort((a, b) => b.createdAt - a.createdAt);
+  if (isAtelier()) return viewAtelierHome();
+  const list = await myProducts();
   app.innerHTML = `<div class="view home">
     <section class="card hero">
       <div class="hero-text">
@@ -249,6 +262,70 @@ async function viewHome(prefill) {
   }
 }
 
+/* ---------- Vue : accueil de l'Atelier (créations faites main) ---------- */
+async function viewAtelierHome() {
+  const list = await myProducts();
+  app.innerHTML = `<div class="view home">
+    <section class="card hero">
+      <div class="hero-text">
+        <h1>Nouvelle création</h1>
+        <p>Ajoute les photos de ton produit fait main. L’IA les met en valeur sans changer ta création, le site écrit la description et calcule le prix, puis tu publies sur Etsy.</p>
+      </div>
+      <form id="newForm" class="new-form" novalidate>
+        <label>Nom du produit<input id="aName" type="text" placeholder="ex : Bougie parfumée à la vanille" autocomplete="off"></label>
+        <label>Photos de ta création<input id="aPhotos" type="file" accept="image/*" multiple></label>
+        <div class="previews" id="aPrev"></div>
+        <label>Quelques mots dessus <small>matières, taille, fabrication… (facultatif)</small><textarea id="aNotes" rows="3" placeholder="ex : Cire de soja coulée à la main, mèche en coton, 200 g, environ 40 h de combustion."></textarea></label>
+        <div class="grid2">
+          <label>Coût de fabrication (€)<input id="aCost" type="number" step="0.01" min="0" placeholder="ex : 4,50"></label>
+          <label>Frais d’envoi (€)<input id="aShip" type="number" step="0.01" min="0" value="0"></label>
+        </div>
+        <button class="primary big" type="submit" id="aGo">Créer la fiche →</button>
+        <p class="form-err" id="aErr" role="alert"></p>
+      </form>
+    </section>
+    <section>
+      <h2 class="section-h">Mes créations <span>${list.length || ''}</span></h2>
+      ${list.length ? `<div class="grid">${list.map(card).join('')}</div>`
+        : '<p class="empty">Aucune création pour l’instant. Ta première fiche apparaîtra ici.</p>'}
+    </section>
+  </div>`;
+
+  let files = [];
+  $('#aPhotos').addEventListener('change', (ev) => {
+    files = [...ev.target.files].filter((f) => f.type.startsWith('image/')).slice(0, 10);
+    $('#aPrev').innerHTML = files.map((f) => `<img src="${URL.createObjectURL(f)}" alt="">`).join('');
+  });
+
+  $('#newForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const err = $('#aErr'), btn = $('#aGo');
+    const name = $('#aName').value.trim(), cost = parseFloat($('#aCost').value), ship = parseFloat($('#aShip').value) || 0;
+    err.textContent = '';
+    if (!name) { err.textContent = 'Donne un nom à ton produit.'; return; }
+    if (!files.length) { err.textContent = 'Ajoute au moins une photo de ta création.'; return; }
+    if (!(cost > 0)) { err.textContent = 'Indique ce que te coûte la fabrication (il sert à calculer ton bénéfice).'; return; }
+    btn.disabled = true;
+    btn.textContent = 'Préparation des photos…';
+    try {
+      const images = [];
+      for (const f of files) {
+        const url = URL.createObjectURL(f);
+        images.push(await toJpeg(url, 1600, 0.9));
+        URL.revokeObjectURL(url);
+      }
+      const id = 'a' + Date.now().toString(36);
+      const src = { id, kind: 'atelier', url: '', title: name, images, notes: $('#aNotes').value.trim() };
+      await DB.put({ id, source: src, createdAt: Date.now(), edit: newEdit(src, cost, ship) });
+      location.hash = '#/p/' + id;
+    } catch (e) {
+      err.textContent = 'Impossible de lire ces photos : ' + e.message;
+      btn.disabled = false;
+      btn.textContent = 'Créer la fiche →';
+    }
+  });
+}
+
 function card(p) {
   const pr = pricing(p.edit), img = p.edit.photos[0] || p.source.images[0];
   const pub = [p.edit.ebay && 'eBay', p.edit.etsy && 'Etsy'].filter(Boolean);
@@ -264,7 +341,7 @@ function card(p) {
 /* ---------- Vue : fiche produit ---------- */
 async function viewProduct(id) {
   const p = await DB.get(id);
-  if (!p) { location.hash = '#/'; return; }
+  if (!p || (p.source.kind === 'atelier') !== isAtelier()) { location.hash = '#/'; return; }
   const s = p.source, e = p.edit;
   let saveTimer;
   const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => DB.put(p), 250); };
@@ -273,12 +350,12 @@ async function viewProduct(id) {
     `<button type="button" data-v="${v}" class="${val === v ? 'on' : ''}">${l}${h ? `<small>${h}</small>` : ''}</button>`).join('')}</div>`;
 
   app.innerHTML = `<div class="view product">
-    <div class="crumbs"><a href="#/">← Mes produits</a><a href="${esc(s.url)}" target="_blank" rel="noopener">Voir sur AliExpress ↗</a></div>
+    <div class="crumbs"><a href="#/">← ${s.kind === 'atelier' ? 'Mes créations' : 'Mes produits'}</a>${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">Voir sur AliExpress ↗</a>` : ''}</div>
     <div class="product-grid">
       <div class="steps">
 
         <section class="card step">
-          <header><span class="num">1</span><div><h2>Photos</h2><p>Crée de nouvelles photos à partir d’une photo du fournisseur : même produit, nouveau décor.</p></div></header>
+          <header><span class="num">1</span><div><h2>Photos</h2><p>${s.kind === 'atelier' ? 'Mets ta création en valeur : l’IA garde ton produit tel quel et change seulement le décor et la lumière.' : 'Crée de nouvelles photos à partir d’une photo du fournisseur : même produit, nouveau décor.'}</p></div></header>
           <div class="sub">Photo de référence</div>
           <div class="refs">${s.images.map((u, i) => `<button type="button" class="ref ${i === e.ai.ref ? 'on' : ''}" data-ref="${i}" aria-label="Photo ${i + 1}"><img src="${esc(u)}" alt="" loading="lazy"></button>`).join('')}</div>
           <div class="sub">Style</div>
@@ -309,8 +386,8 @@ async function viewProduct(id) {
         <section class="card step">
           <header><span class="num">3</span><div><h2>Prix</h2><p>Le prix de vente est calculé pour que tu gagnes de l’argent, frais compris.</p></div></header>
           <div class="grid2">
-            <label>Prix AliExpress (€)<input type="number" step="0.01" min="0" id="fCost" value="${e.cost}"></label>
-            <label>Livraison AliExpress (€)<input type="number" step="0.01" min="0" id="fShip" value="${e.shipping}"></label>
+            <label>${s.kind === 'atelier' ? 'Coût de fabrication (€)' : 'Prix AliExpress (€)'}<input type="number" step="0.01" min="0" id="fCost" value="${e.cost}"></label>
+            <label>${s.kind === 'atelier' ? 'Frais d’envoi (€)' : 'Livraison AliExpress (€)'}<input type="number" step="0.01" min="0" id="fShip" value="${e.shipping}"></label>
           </div>
           <label>Marge : prix × <b id="multVal"></b><input type="range" min="1.3" max="5" step="0.1" id="fMult" value="${e.multiplier}"></label>
           <label>Prix de vente (€)<span class="row tight"><input type="number" step="0.01" min="0" id="fPrice"><button type="button" class="ghost sm" data-act="price-auto">Auto</button></span></label>
@@ -374,7 +451,8 @@ async function viewProduct(id) {
       else action = `<button type="button" class="btn ${cls}" data-act="pub-${pf}">${done ? 'Republier' : 'Publier'} sur ${name}</button>`;
       return `<div class="pf ${cls}"><div class="pf-head"><b>${name}</b>${done ? `<a href="${esc(done.url)}" target="_blank" rel="noopener" class="pill on">${done.state === 'draft' ? 'Brouillon' : 'En ligne'} · voir ↗</a>` : ''}</div>${action}</div>`;
     };
-    $('#publish').innerHTML = block('ebay', 'eBay', 'ebay') + block('etsy', 'Etsy', 'etsy');
+    // Etsy n'existe que dans l'Atelier (créations faites main) ; eBay que dans la boutique principale
+    $('#publish').innerHTML = isAtelier() ? block('etsy', 'Etsy', 'etsy') : block('ebay', 'eBay', 'ebay');
   }
 
   function refresh() {
@@ -402,7 +480,7 @@ async function viewProduct(id) {
     if (next) e.seed = (e.seed || 0) + 1;
     const g = generateCopy(s, e.tone, e.seed, settings);
     e.title = g.title;
-    e.description = g.description;
+    e.description = withNotes(g.description, s.notes);
     $('#fTitle').value = e.title;
     $('#fDesc').value = e.description;
   }
@@ -505,7 +583,7 @@ async function viewProduct(id) {
   async function generate(btn) {
     const status = $('#aiStatus');
     const ref = s.images[e.ai.ref] || s.images[0];
-    if (!ref) return toast('Il faut une photo du fournisseur comme référence.');
+    if (!ref) return toast('Il faut une photo de référence.');
     btn.disabled = true;
     status.className = 'ai-status busy';
     status.textContent = `Création de ${e.ai.count || 2} photo(s)… compte 20 à 60 secondes.`;
@@ -667,14 +745,13 @@ async function openEtsy(p, onDone) {
   catch (err) { m.body.innerHTML = `<p class="err">${esc(err.message)}</p>`; return; }
   const pre = o.taxonomy.find((t) => t.path === ETSY_CAT[detectCat(p.source.title)]);
   m.body.innerHTML = `
-    <div class="warnbox">Etsy accepte le fait-main, le vintage et les fournitures. Revendre un produit AliExpress tel quel peut faire suspendre la boutique.</div>
     <div class="sum"><img src="${esc(e.photos[0] || '')}" alt=""><div><b>${esc(etsyTitle(e.title))}</b><span>${money(pr.price)} · ${e.photos.length} photo(s)</span></div></div>
     <label>Catégorie Etsy <small>tape pour chercher (en anglais)</small><input type="text" list="etsyTaxo" id="eTaxo" value="${esc(pre ? pre.path : '')}">
       <datalist id="etsyTaxo">${o.taxonomy.map((t) => `<option value="${esc(t.path)}">`).join('')}</datalist></label>
     <div class="grid2">
       <label>Profil de livraison<select id="eShip">${o.shipping.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">— aucun —</option>'}</select></label>
       <label>Délai de préparation<select id="eReady">${o.readiness.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join('') || '<option value="">Par défaut</option>'}</select></label>
-      <label>Qui l’a fabriqué ?<select id="eWho"><option value="someone_else">Une autre entreprise</option><option value="collective">Moi + un partenaire</option><option value="i_did">Moi</option></select></label>
+      <label>Qui l’a fabriqué ?<select id="eWho"><option value="i_did">Moi</option><option value="collective">Moi + un partenaire de production</option></select></label>
       <label>Quantité en vente<input type="number" id="eQty" min="1" value="10"></label>
     </div>
     <label>Mots-clés <small>séparés par des virgules, 13 max</small><input type="text" id="eTags" value="${esc(etsyTags(e.title).join(', '))}"></label>
@@ -721,8 +798,8 @@ function viewSettings() {
       <div class="conn"><div class="conn-head"><b>Photos IA</b><span class="pill ${STATUS.ai ? 'on' : ''}">${STATUS.ai ? (STATUS.ai === 'gemini' ? 'Google Gemini' : 'OpenAI') : 'À configurer'}</span></div>
         ${STATUS.ai ? '<div class="row"><button type="button" class="ghost" data-act="test-ai">Tester l’IA</button><span id="aiTest" class="muted"></span></div>'
           : '<p class="note">Ajoute la variable GEMINI_API_KEY sur Render (voir GUIDE.md).</p>'}</div>
-      ${conn('ebay', 'eBay', 'Adresse à mettre dans « Auth accepted URL »', STATUS.ebayAccept || '')}
-      ${conn('etsy', 'Etsy', 'Adresse de redirection à déclarer', STATUS.etsyRedirect || '')}
+      ${isAtelier() ? conn('etsy', 'Etsy', 'Adresse de redirection à déclarer', STATUS.etsyRedirect || '')
+        : conn('ebay', 'eBay', 'Adresse à mettre dans « Auth accepted URL »', STATUS.ebayAccept || '')}
     </section>
     <form class="card" id="setForm">
       <h2>Ma boutique</h2>
@@ -814,12 +891,19 @@ async function route() {
 }
 
 function updateDots() {
-  const ok = [STATUS.ai, STATUS.ebay && getAuth('ebay'), STATUS.etsy && getAuth('etsy')];
+  const ok = isAtelier() ? [STATUS.ai, STATUS.etsy && getAuth('etsy')] : [STATUS.ai, STATUS.ebay && getAuth('ebay')];
   $('#navDots').innerHTML = ok.map((x) => `<i class="${x ? 'on' : ''}"></i>`).join('');
 }
 
 (async function init() {
   try { STATUS = await api('/api/status'); } catch (err) { toast(err.message); }
+  if (isAtelier()) {
+    document.body.classList.add('atelier');
+    $('.brand').innerHTML = '<span class="logo">D</span>DropBoost <em>Atelier</em>';
+    $('[data-nav="home"]').textContent = 'Mes créations';
+    document.title = 'DropBoost Atelier';
+  }
+  if (STATUS.locked) $('nav').insertAdjacentHTML('beforeend', '<a href="/logout" title="Changer de mot de passe">Quitter</a>');
   updateDots();
   window.addEventListener('hashchange', route);
   await route();
