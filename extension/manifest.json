@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "DropBoost",
+  "version": "2.0.0",
+  "description": "Un clic sur une page AliExpress : le produit arrive sur ton site DropBoost.",
+  "content_scripts": [
+    {
+      "matches": ["https://*.aliexpress.com/*", "https://*.aliexpress.us/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
