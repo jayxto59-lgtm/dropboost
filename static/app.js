@@ -89,6 +89,35 @@ async function toJpeg(u, max = 1600, q = 0.9) {
   x.drawImage(bmp, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', q);
 }
+// Copie du texte ; la description part aussi en HTML pour garder la mise en forme quand on la colle
+async function copyText(text, html) {
+  try {
+    if (html && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' })
+      })]);
+    } else {
+      await navigator.clipboard.writeText(text);
+    }
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+function flash(btn, ok) {
+  const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
+  btn.textContent = ok ? 'Copié ✓' : 'Copie impossible';
+  btn.classList.toggle('copied', ok);
+  setTimeout(() => { btn.textContent = label; btn.classList.remove('copied'); }, 1600);
+}
 const slug = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'produit';
 
 /* ---------- Prix ---------- */
@@ -266,6 +295,15 @@ async function viewProduct(id) {
         <section class="card step">
           <header><span class="num">4</span><div><h2>Publier</h2><p>L’annonce part directement sur ton compte, avec les photos, le texte et le prix.</p></div></header>
           <div class="publish" id="publish"></div>
+          <div class="manual">
+            <div class="sub">Ou publier à la main <span class="muted">· sur n’importe quel site (Vinted, Leboncoin, Shopify…)</span></div>
+            <div class="row">
+              <button type="button" class="ghost" data-act="copy-title">Copier le titre</button>
+              <button type="button" class="ghost" data-act="copy-desc">Copier la description</button>
+              <button type="button" class="ghost" data-act="copy-price">Copier le prix</button>
+              <button type="button" class="primary" data-act="dl-photos">⬇ Télécharger les photos</button>
+            </div>
+          </div>
           <div class="row"><button type="button" class="link danger" data-act="delete">Supprimer ce produit</button></div>
         </section>
       </div>
@@ -402,6 +440,11 @@ async function viewProduct(id) {
     if (act === 'regen') { regen(true); refresh(); save(); }
     if (act === 'price-auto') { e.priceOverride = null; refresh(); save(); }
     if (act === 'ai-gen') generate(ev.target.closest('button'));
+    const btn = ev.target.closest('button');
+    if (act === 'copy-title') flash(btn, await copyText(e.title));
+    if (act === 'copy-desc') flash(btn, await copyText(mdToText(e.description), mdToHtml(e.description)));
+    if (act === 'copy-price') flash(btn, await copyText(pricing(e).price.toFixed(2).replace('.', ',')));
+    if (act === 'dl-photos') downloadPhotos(btn);
     if (act === 'pub-ebay') openEbay(p, () => { renderPublish(); save(); });
     if (act === 'pub-etsy') openEtsy(p, () => { renderPublish(); save(); });
     if (act === 'delete') confirmBox('Supprimer ce produit de DropBoost ? (Les annonces déjà publiées restent en ligne.)', async () => {
@@ -409,6 +452,30 @@ async function viewProduct(id) {
       location.hash = '#/';
     });
   });
+
+  async function downloadPhotos(btn) {
+    if (!e.photos.length) return toast('Choisis d’abord les photos de l’annonce (étape 1).');
+    const label = btn.textContent;
+    btn.disabled = true;
+    try {
+      for (let i = 0; i < e.photos.length; i++) {
+        btn.textContent = `Photo ${i + 1}/${e.photos.length}…`;
+        const a = document.createElement('a');
+        a.href = await toJpeg(e.photos[i], 1600, 0.92);
+        a.download = `${slug(e.title)}-${i + 1}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      toast(`✅ ${e.photos.length} photo${e.photos.length > 1 ? 's' : ''} téléchargée${e.photos.length > 1 ? 's' : ''} (la 1re est la principale).`);
+    } catch (err) {
+      toast('❌ ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
 
   async function generate(btn) {
     const status = $('#aiStatus');
