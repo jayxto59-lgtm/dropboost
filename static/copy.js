@@ -125,9 +125,12 @@ function cleanTitle(raw) {
   return t ? cap(t) : 'Nouveau produit';
 }
 
+const DANGLING = /^(à|a|au|aux|de|du|des|d’|d'|la|le|les|l’|l'|en|et|avec|pour|sur|par|un|une|with|and|for|the|of)$/i;
+
 function shortName(title) {
-  const words = title.split(',')[0].split(' ').filter(Boolean);
-  return words.slice(0, 6).join(' ');
+  const words = title.split(',')[0].split(' ').filter(Boolean).slice(0, 6);
+  while (words.length > 2 && DANGLING.test(words[words.length - 1])) words.pop(); // pas de "… coulée à la"
+  return words.join(' ');
 }
 
 function detectCat(text) {
