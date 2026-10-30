@@ -186,6 +186,9 @@ code.copy:hover { background: var(--line); }
 .pf.etsy .pf-head b { color: var(--etsy); }
 .pf .btn { width: 100%; padding: 13px; }
 .pf .note { margin: 0; }
+.manual { margin-top: 20px; padding-top: 4px; border-top: 1px solid var(--line); }
+.manual .row { margin-top: 10px; }
+.ghost.copied { background: var(--good-bg); border-color: var(--good); color: var(--good); }
 
 /* Aperçu */
 .preview { position: sticky; top: 76px; }
