@@ -10,7 +10,7 @@ const app = $('#app');
 const DEFAULT_SETTINGS = {
   shopName: 'Ma Boutique', multiplier: 2.5, compareRatio: 1.7, feePct: 2.9, feeFixed: 0.3, adsPerSale: 0, tone: 'pro',
   shippingText: 'Livraison suivie offerte (7 à 15 jours ouvrés)', returnText: 'Satisfait ou remboursé sous 14 jours',
-  city: '', postalCode: ''
+  city: '', postalCode: '', myStyle: ''
 };
 const ls = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -153,7 +153,22 @@ const SCENES = {
   enfant: 'in a bright colorful kids playroom, cheerful natural light, family lifestyle photography',
   general: 'in a bright modern home setting where it is naturally used, natural daylight, lifestyle product photography'
 };
+// "Mon style" : le prompt perso des Réglages, plus une consigne fixe pour ne jamais changer le produit
+const hasMyStyle = () => !!(settings.myStyle || '').trim();
+const defaultStyle = () => (hasMyStyle() ? 'mine' : 'studio');
+const styleChoices = () => [
+  ...(hasMyStyle() ? [['mine', 'Mon style', 'Ton prompt perso']] : []),
+  ...Object.entries(STYLES).map(([k, v]) => [k, v.label, v.hint])
+];
+
 function buildPrompt(src, style) {
+  if (style === 'mine' && hasMyStyle()) {
+    return `${settings.myStyle.trim()}
+
+Use the exact product shown in the reference image and keep it 100% identical: same shape, colors, materials, proportions, pattern and details. Show it only once. Do not add any text, price, badge or watermark.
+
+Product: ${cleanTitle(src.title)}`;
+  }
   const scene = (STYLES[style] && STYLES[style].scene) || SCENES[detectCat(src.title)];
   return `Create a new professional product photo of the exact product shown in the reference image: ${scene}.
 
@@ -177,7 +192,7 @@ function newEdit(src, cost, shipping) {
   return {
     title: g.title, description: withNotes(g.description, src.notes), tone: settings.tone, seed: 0,
     cost, shipping, multiplier: settings.multiplier, priceOverride: null,
-    ai: { style: 'studio', prompt: buildPrompt(src, 'studio'), ref: 0, count: 2 },
+    ai: { style: defaultStyle(), prompt: buildPrompt(src, defaultStyle()), ref: 0, count: 2 },
     gen: [], photos: (src.images || []).slice(0, 8), etsy: null, ebay: null
   };
 }
@@ -359,7 +374,8 @@ async function viewProduct(id) {
           <div class="sub">Photo de référence</div>
           <div class="refs">${s.images.map((u, i) => `<button type="button" class="ref ${i === e.ai.ref ? 'on' : ''}" data-ref="${i}" aria-label="Photo ${i + 1}"><img src="${esc(u)}" alt="" loading="lazy"></button>`).join('')}</div>
           <div class="sub">Style</div>
-          ${chips('style', e.ai.style, Object.entries(STYLES).map(([k, v]) => [k, v.label, v.hint]))}
+          ${chips('style', e.ai.style, styleChoices())}
+          ${hasMyStyle() ? '' : '<p class="hint">Astuce : colle ton propre prompt dans <a href="#/reglages">Réglages → Mon style de photos</a> pour que toutes tes photos aient le même style.</p>'}
           <details class="prompt"><summary>Voir ou modifier le prompt</summary>
             <textarea id="aiPrompt" rows="8">${esc(e.ai.prompt)}</textarea>
             <button type="button" class="link" data-act="prompt-reset">Remettre le prompt par défaut</button>
@@ -816,6 +832,10 @@ function viewSettings() {
       </div>
       ${f('shippingText', 'Texte livraison', 'text')}
       ${f('returnText', 'Texte retours', 'text')}
+      <h2 class="sub-h">Mon style de photos</h2>
+      <label>Ton prompt <small>décris le décor, la lumière, l’ambiance… Il sera utilisé pour tous tes nouveaux produits.</small>
+        <textarea name="myStyle" rows="6" placeholder="ex : Photo produit sur fond lin beige, lumière naturelle douce venant de la gauche, quelques fleurs séchées autour, ambiance cosy et minimaliste, format carré.">${esc(settings.myStyle)}</textarea></label>
+      <p class="hint">DropBoost ajoute toujours à la fin : « garde le produit 100 % identique, sans texte ni filigrane ».</p>
       <div class="row"><button class="primary" type="submit">Enregistrer</button><button type="button" class="link" data-act="surprise">Revoir la surprise 🎂</button></div>
     </form>
   </div>`;
