@@ -206,5 +206,7 @@ function mdToHtml(src) {
 }
 
 function mdToText(src) {
-  return String(src || '').replace(/^##\s+/gm, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^-\s+/gm, '• ');
+  // "- ✔ texte" garde son emoji comme puce ; "- texte" devient "• texte"
+  return String(src || '').replace(/^##\s+/gm, '').replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/^-\s+(?=[\p{L}\p{N}])/gmu, '• ').replace(/^-\s+/gm, '');
 }
