@@ -108,6 +108,11 @@ code.copy:hover { background: var(--line); }
 .new-form .big { width: 100%; margin-top: 18px; background: var(--accent); }
 .new-form .big:hover { background: #cf3a20; }
 .new-form .form-err { margin: 12px 0 0; }
+.ext { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 24px; align-items: center; }
+.ext-text p { margin: 8px 0 14px; color: var(--muted); }
+.ext-steps { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14.5px; color: #3b332c; }
+.ext-steps code { padding: 2px 6px; border-radius: 6px; background: var(--soft); font: 600 13px/1.4 ui-monospace, Consolas, monospace; }
+@media (max-width: 760px) { .ext { grid-template-columns: 1fr; } }
 .section-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
 .section-h span { color: var(--muted); font: 600 15px/1 var(--body); }
 .empty { color: var(--muted); }
