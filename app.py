@@ -7,11 +7,13 @@ import base64
 import hashlib
 import hmac
 import html as H
+import io
 import json
 import os
 import re
 import secrets
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
 
@@ -284,13 +286,27 @@ def candidate_models(provider):
         return GEMINI_FALLBACK if provider == 'gemini' else OPENAI_FALLBACK
 
 
+GEMINI_NO_BILLING = ('Ta clé Gemini est en mode gratuit : Google ne permet pas de générer des images sans facturation. '
+                     'Active la facturation sur aistudio.google.com (menu « Billing » / « Facturation »), puis réessaie. '
+                     'Rien à changer sur Render.')
+
+
+def gemini_check(r):
+    if r.status_code == 200:
+        return
+    if r.status_code == 429:
+        if 'free_tier' in r.text and 'limit: 0' in r.text:
+            raise Oops(GEMINI_NO_BILLING, 402, 429)
+        raise Oops('Gemini reçoit trop de demandes en ce moment : réessaie dans une minute.', 429, 429)
+    raise Oops(api_error(r, 'Gemini'), 502, r.status_code)
+
+
 def gemini_image(model, prompt, img_b64, mime):
     r = requests.post(f'{GEMINI}/models/{model}:generateContent', timeout=170,
                       headers={'x-goog-api-key': env('GEMINI_API_KEY')},
                       json={'contents': [{'parts': [{'text': prompt}, {'inline_data': {'mime_type': mime, 'data': img_b64}}]}],
                             'generationConfig': {'responseModalities': ['TEXT', 'IMAGE']}})
-    if r.status_code != 200:
-        raise Oops(api_error(r, 'Gemini'), 502, r.status_code)
+    gemini_check(r)
     cand = (r.json().get('candidates') or [{}])[0]
     for part in (cand.get('content') or {}).get('parts') or []:
         d = part.get('inlineData') or part.get('inline_data')
@@ -361,7 +377,28 @@ def api_test_ai():
     if not provider:
         raise Oops('Aucune clé d’IA configurée sur Render.')
     models = candidate_models(provider)
+    if provider == 'gemini':
+        # Une toute petite demande texte : révèle une clé sans facturation (quota d'images à 0)
+        r = requests.post(f'{GEMINI}/models/{models[0]}:generateContent', timeout=60,
+                          headers={'x-goog-api-key': env('GEMINI_API_KEY')},
+                          json={'contents': [{'parts': [{'text': 'Reply with OK.'}]}], 'generationConfig': {'maxOutputTokens': 5}})
+        gemini_check(r)
     return jsonify(ok=True, provider='Google Gemini' if provider == 'gemini' else 'OpenAI', model=models[0])
+
+
+# ---------------------------------------------------------------- extension navigateur
+
+@app.get('/extension.zip')
+def extension_zip():
+    """L'extension, avec l'adresse de ce site déjà dedans."""
+    buf = io.BytesIO()
+    root = os.path.join(app.root_path, 'extension')
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        for name in sorted(os.listdir(root)):
+            with open(os.path.join(root, name), encoding='utf-8') as f:
+                z.writestr('DropBoost/' + name, f.read().replace('__SITE__', base_url()))
+    return Response(buf.getvalue(), mimetype='application/zip',
+                    headers={'Content-Disposition': 'attachment; filename=DropBoost-extension.zip'})
 
 
 # ---------------------------------------------------------------- connexion (OAuth)
