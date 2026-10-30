@@ -175,7 +175,7 @@ function newEdit(src, cost, shipping) {
 }
 
 /* ---------- Vue : accueil ---------- */
-async function viewHome() {
+async function viewHome(prefill) {
   const list = (await DB.all()).sort((a, b) => b.createdAt - a.createdAt);
   app.innerHTML = `<div class="view home">
     <section class="card hero">
@@ -192,6 +192,18 @@ async function viewHome() {
         <button class="primary big" type="submit" id="nGo">Créer la fiche →</button>
         <p class="form-err" id="nErr" role="alert"></p>
       </form>
+    </section>
+    <section class="card ext">
+      <div class="ext-text">
+        <h2>🚀 Extension AliExpress</h2>
+        <p>Un bouton « Envoyer à DropBoost » apparaît sur chaque produit AliExpress : un clic, et la fiche se crée ici avec le prix.</p>
+        <a class="btn primary" href="/extension.zip" download>⬇ Télécharger l’extension</a>
+      </div>
+      <ol class="ext-steps">
+        <li>Dézippe le fichier téléchargé.</li>
+        <li>Ouvre <code>opera://extensions</code> (Opera GX) ou <code>chrome://extensions</code> (Chrome) et active le <b>mode développeur</b>.</li>
+        <li>Clique sur <b>Charger l’extension non empaquetée</b> et choisis le dossier <b>DropBoost</b>.</li>
+      </ol>
     </section>
     <section>
       <h2 class="section-h">Mes produits <span>${list.length || ''}</span></h2>
@@ -222,6 +234,19 @@ async function viewHome() {
       btn.textContent = 'Créer la fiche →';
     }
   });
+
+  // Produit envoyé par l'extension : on remplit et, si le prix est connu, on crée la fiche directement
+  if (prefill && prefill.url) {
+    $('#nUrl').value = prefill.url;
+    if (prefill.ship) $('#nShip').value = prefill.ship;
+    if (parseFloat(prefill.cost) > 0) {
+      $('#nCost').value = prefill.cost;
+      $('#newForm').requestSubmit();
+    } else {
+      $('#nErr').textContent = 'Produit reçu ! Le prix n’a pas pu être lu : tape-le puis clique sur « Créer la fiche ».';
+      $('#nCost').focus();
+    }
+  }
 }
 
 function card(p) {
@@ -776,7 +801,12 @@ async function route() {
   $$('.modal').forEach((m) => m.remove());
   const h = location.hash;
   const m = h.match(/^#\/p\/(.+)$/);
-  if (m) await viewProduct(decodeURIComponent(m[1]));
+  const imp = h.match(/^#\/import\?(.*)$/);
+  if (imp) {
+    const q = new URLSearchParams(imp[1]);
+    history.replaceState(null, '', '/#/');
+    await viewHome({ url: q.get('u'), cost: q.get('p'), ship: q.get('s') });
+  } else if (m) await viewProduct(decodeURIComponent(m[1]));
   else if (h === '#/reglages') viewSettings();
   else await viewHome();
   $$('[data-nav]').forEach((a) => a.classList.toggle('on', (a.dataset.nav === 'settings') === (h === '#/reglages')));
