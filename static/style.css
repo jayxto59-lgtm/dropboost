@@ -230,6 +230,7 @@ input[type="file"] { padding: 10px; border: 1.5px dashed var(--line); border-rad
 .conn-head b { font: 16px/1 var(--display); }
 .conn .row { margin-top: 10px; }
 .settings form h2 { margin-bottom: 2px; }
+.settings form .sub-h { margin-top: 26px; }
 
 /* Fenêtres */
 .modal { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: rgba(27, 23, 20, .5); }
