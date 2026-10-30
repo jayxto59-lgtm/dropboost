@@ -99,13 +99,26 @@ def data_url_bytes(d):
 # ---------------------------------------------------------------- mot de passe
 
 PASSWORD = env('APP_PASSWORD')
+# L'Atelier : un 2e mot de passe pour les créations faites main. C'est le seul endroit qui publie sur Etsy,
+# et il n'importe rien depuis AliExpress.
+ATELIER_PASSWORD = env('ATELIER_PASSWORD')
+LOCKED = bool(PASSWORD or ATELIER_PASSWORD)
 OPEN_PATHS = ('/login', '/api/login', '/favicon.ico')
+
+
+def mode():
+    return session.get('mode') or env('DEFAULT_MODE', 'shop')
+
+
+def require_mode(wanted, msg):
+    if mode() != wanted:
+        raise Oops(msg, 403)
 
 
 @app.before_request
 def guard():
     p = request.path
-    if not PASSWORD or session.get('ok') or p in OPEN_PATHS or p.startswith('/static/'):
+    if not LOCKED or session.get('ok') or p in OPEN_PATHS or p.startswith('/static/'):
         return None
     if p.startswith('/api/'):
         return jsonify(error='Mot de passe requis, recharge la page.'), 401
@@ -119,13 +132,25 @@ def login_page():
 
 @app.post('/api/login')
 def api_login():
-    pw = str(body().get('password', ''))
-    if PASSWORD and not hmac.compare_digest(pw.encode(), PASSWORD.encode()):
+    pw = str(body().get('password', '')).encode()
+    if ATELIER_PASSWORD and hmac.compare_digest(pw, ATELIER_PASSWORD.encode()):
+        chosen = 'atelier'
+    elif not PASSWORD or hmac.compare_digest(pw, PASSWORD.encode()):
+        chosen = 'shop'
+    else:
         time.sleep(0.6)
         raise Oops('Mot de passe incorrect.', 401)
+    session.clear()
     session.permanent = True
     session['ok'] = True
-    return jsonify(ok=True)
+    session['mode'] = chosen
+    return jsonify(ok=True, mode=chosen)
+
+
+@app.get('/logout')
+def logout():
+    session.clear()
+    return redirect('/login')
 
 
 @app.get('/')
@@ -157,6 +182,8 @@ def ai_provider():
 def api_status():
     b = base_url()
     return jsonify(
+        mode=mode(),
+        locked=LOCKED,
         ai=ai_provider(),
         etsy=bool(env('ETSY_KEYSTRING') and env('ETSY_SHARED_SECRET')),
         ebay=bool(env('EBAY_CLIENT_ID') and env('EBAY_CLIENT_SECRET') and env('EBAY_RUNAME')),
@@ -187,8 +214,12 @@ def product_id(text):
     return next((g for g in m.groups() if g), None) if m else None
 
 
+NO_ALIEXPRESS = 'L’Atelier est réservé à tes créations faites main : pas d’import AliExpress ici.'
+
+
 @app.post('/api/import')
 def api_import():
+    require_mode('shop', NO_ALIEXPRESS)
     raw = str(body().get('url', '')).strip()
     found = re.search(r'https?://\S+', raw)
     url = found.group(0).rstrip(').,;!') if found else raw
@@ -231,6 +262,7 @@ def api_import():
 
 @app.get('/api/img')
 def api_img():
+    require_mode('shop', NO_ALIEXPRESS)
     u = request.args.get('u', '')
     if not IMG_HOST.match(u):
         raise Oops('Image refusée.')
@@ -391,6 +423,7 @@ def api_test_ai():
 @app.get('/extension.zip')
 def extension_zip():
     """L'extension, avec l'adresse de ce site déjà dedans."""
+    require_mode('shop', NO_ALIEXPRESS)
     buf = io.BytesIO()
     root = os.path.join(app.root_path, 'extension')
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -450,8 +483,12 @@ def etsy_call(auth, method, path, data=None, files=None):
     return r.json() if r.content else {}
 
 
+ETSY_ATELIER_ONLY = 'Etsy se publie uniquement depuis l’Atelier (tes créations faites main). Connecte-toi avec le mot de passe Atelier.'
+
+
 def etsy_auth(j):
     """La connexion envoyée par le navigateur, rafraîchie si besoin."""
+    require_mode('atelier', ETSY_ATELIER_ONLY)
     need('ETSY_KEYSTRING', 'ETSY_SHARED_SECRET')
     auth = j.get('auth') or {}
     if not auth.get('token'):
@@ -463,6 +500,7 @@ def etsy_auth(j):
 
 @app.get('/auth/etsy/start')
 def etsy_start():
+    require_mode('atelier', ETSY_ATELIER_ONLY)
     need('ETSY_KEYSTRING', 'ETSY_SHARED_SECRET')
     verifier = secrets.token_urlsafe(48)
     state = secrets.token_urlsafe(16)
@@ -613,6 +651,7 @@ def ebay_call(auth, method, path, payload=None):
 
 
 def ebay_auth(j):
+    require_mode('shop', 'eBay se publie depuis la boutique principale, pas depuis l’Atelier.')
     need('EBAY_CLIENT_ID', 'EBAY_CLIENT_SECRET', 'EBAY_RUNAME')
     auth = j.get('auth') or {}
     if not auth.get('token'):
@@ -624,6 +663,7 @@ def ebay_auth(j):
 
 @app.get('/auth/ebay/start')
 def ebay_start():
+    require_mode('shop', 'eBay se publie depuis la boutique principale, pas depuis l’Atelier.')
     need('EBAY_CLIENT_ID', 'EBAY_CLIENT_SECRET', 'EBAY_RUNAME')
     state = secrets.token_urlsafe(16)
     session['ebay'] = state
